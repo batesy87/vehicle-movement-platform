@@ -102,7 +102,9 @@ Root Directory → `apps/web`, then redeploy.
 
 Install and build commands are left to Vercel, which handles pnpm workspaces
 natively: it runs the install at the workspace root and builds in the root
-directory. `next.config.mjs` sets `outputFileTracingRoot` so the workspace
+directory. Function region is left to project settings too (Settings →
+Functions), since which regions are available depends on your plan and pinning
+one in `vercel.json` only narrows what can work. `next.config.mjs` sets `outputFileTracingRoot` so the workspace
 packages under `packages/` are traced into the deployed bundle rather than
 going missing at runtime.
 
