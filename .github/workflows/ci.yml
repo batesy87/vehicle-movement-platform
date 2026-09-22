@@ -37,9 +37,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No `version:` here on purpose. package.json declares
+      # "packageManager": "pnpm@10.33.0", and action-setup refuses to run when
+      # a version is given in both places. Letting it read packageManager also
+      # means CI and local development cannot drift onto different pnpm
+      # versions.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - uses: actions/setup-node@v4
         with:
@@ -69,9 +72,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No `version:` here on purpose. package.json declares
+      # "packageManager": "pnpm@10.33.0", and action-setup refuses to run when
+      # a version is given in both places. Letting it read packageManager also
+      # means CI and local development cannot drift onto different pnpm
+      # versions.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - uses: actions/setup-node@v4
         with:

@@ -109,8 +109,13 @@ model.
 
 ## Deployment
 
-Built for Supabase (Postgres, Auth, Storage) and Vercel. Two notes on cost,
-since the intention is to stay near zero until there is revenue:
+Built for Supabase (Postgres, Auth, Storage) and Vercel. Step-by-step setup is
+in [docs/setup.md](docs/setup.md). The one setting people miss: Vercel's **Root
+Directory** must be `apps/web`, because this is a monorepo and the repository
+root holds no app.
+
+Two notes on cost, since the intention is to stay near zero until there is
+revenue:
 
 - Vercel's Hobby tier forbids commercial use, so budget for Pro once you charge
   anyone.
