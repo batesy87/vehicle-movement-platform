@@ -1,0 +1,5 @@
+# Supabase CLI working state. Migrations and config.toml are tracked; nothing
+# the CLI generates at runtime is.
+.branches
+.temp
+.env

@@ -247,7 +247,7 @@ export async function truncateAll(): Promise<void> {
     const { rows } = await tx.query<{ tablename: string }>(
       `select tablename from pg_tables
         where schemaname = 'public'
-          and tablename not in ('plans', 'schema_migrations')`,
+          and tablename <> 'plans'`,
     );
     const names = rows.map((r) => `public.${r.tablename}`).join(", ");
     if (names) {

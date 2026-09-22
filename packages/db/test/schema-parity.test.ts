@@ -58,8 +58,7 @@ describe("drizzle tables", () => {
   it("cover every table in the database", async () => {
     const inDatabase = await asAdmin(async (tx) => {
       const { rows } = await tx.query<{ tablename: string }>(
-        `select tablename from pg_tables
-          where schemaname = 'public' and tablename <> 'schema_migrations'`,
+        `select tablename from pg_tables where schemaname = 'public'`,
       );
       return rows.map((r) => r.tablename).sort();
     });

@@ -5,9 +5,16 @@ work.
 
 ## What is authoritative
 
-`migrations/*.sql`. Numbered, applied in order, each in its own transaction.
-They hold the tables, the policies, the triggers, the check constraints and the
-composite foreign keys, none of which have a faithful representation in an ORM.
+`../../supabase/migrations/*.sql`. Applied in filename order, each in its own
+transaction. They hold the tables, the policies, the triggers, the check
+constraints and the composite foreign keys, none of which have a faithful
+representation in an ORM.
+
+They live under `supabase/` and are named `<14-digit timestamp>_<name>.sql` so
+the Supabase CLI and this runner operate on exactly the same files. The runner
+records what it applied in `supabase_migrations.schema_migrations`, the ledger
+the CLI reads, so `supabase db push` and `pnpm migrate` agree about what is
+already applied and neither re-runs the other's work.
 
 `src/schema/` mirrors that in Drizzle so application queries are typed.
 `test/schema-parity.test.ts` compares the two in both directions and fails on
@@ -38,22 +45,26 @@ that schema holds the user accounts.
 
 | File | Contents |
 |---|---|
-| `0001_foundation` | roles, extensions, `auth` shim, the `app` schema, every enum |
-| `0002_tenancy_tables` | plans, companies, membership, driver profiles, invitations |
-| `0003_tenancy_functions` | the membership and role predicates every policy is built from |
-| `0004_tenancy_policies` | policies for 0002 |
-| `0005_operations` | clients, locations, vehicles, rate cards |
-| `0006_movement` | consignments, vehicles, trips, legs, trip stops |
-| `0007_custody_and_media` | custody events, media, condition findings, breadcrumbs |
-| `0008_billing_and_audit` | invoices, usage metering, audit log |
-| `0009_rpc` | signup, driver invitation, invitation acceptance |
-| `0010_reference_data` | plan tiers |
+| `...120001_foundation` | roles, extensions, `auth` shim, the `app` schema, every enum |
+| `...120002_tenancy_tables` | plans, companies, membership, driver profiles, invitations |
+| `...120003_tenancy_functions` | the membership and role predicates every policy is built from |
+| `...120004_tenancy_policies` | policies for the tables in the previous step |
+| `...120005_operations` | clients, locations, vehicles, rate cards |
+| `...120006_movement` | consignments, vehicles, trips, legs, trip stops |
+| `...120007_custody_and_media` | custody events, media, condition findings, breadcrumbs |
+| `...120008_billing_and_audit` | invoices, usage metering, audit log |
+| `...120009_rpc` | signup, driver invitation, invitation acceptance |
+| `...120010_reference_data` | plan tiers |
 
 Policies normally sit directly beneath the table they guard. Two places break
 that, both because Postgres validates SQL function bodies at creation time and
-a predicate cannot reference a table that does not exist yet: 0002 and 0004 are
-split around the helpers in 0003, and the driver-visibility predicates in 0006
-are gathered at the end of the file, after `legs`.
+a predicate cannot reference a table that does not exist yet: the tenancy
+tables and their policies are split around the helpers between them, and the
+driver-visibility predicates in `movement` are gathered at the end of that
+file, after `legs`.
+
+Add a migration with `supabase migration new <name>`, which generates the
+correct filename. Never edit one that has been applied.
 
 ## Running the tests locally
 

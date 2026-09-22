@@ -114,7 +114,7 @@ nothing ever wrote it.
 
 | Concern | Where |
 |---|---|
-| Schema, policies, triggers, constraints | `packages/db/migrations/*.sql` (source of truth) |
+| Schema, policies, triggers, constraints | `supabase/migrations/*.sql` (source of truth) |
 | Typed query surface | `packages/db/src/schema/` (mirrors the SQL; parity tested) |
 | Enums, plan features, validation, vocabularies | `packages/shared/src/` |
 | Proof that it fails closed | `packages/db/test/` |

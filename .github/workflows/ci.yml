@@ -48,6 +48,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Applies supabase/migrations with the same runner developers use, and
+      # records them in the ledger the Supabase CLI reads.
       - name: Apply migrations to a fresh database
         run: pnpm db:migrate
 
