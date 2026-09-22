@@ -1,0 +1,7 @@
+{
+  "extends": "@platform/config/tsconfig.node.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
+}

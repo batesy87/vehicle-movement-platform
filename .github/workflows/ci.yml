@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+  DATABASE_MIGRATION_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+
+jobs:
+  database:
+    name: Schema and row level security
+    runs-on: ubuntu-latest
+
+    # Postgres 15 or later: the schema uses ON DELETE SET NULL with a column
+    # list, which earlier versions do not support.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations to a fresh database
+        run: pnpm db:migrate
+
+      - name: Seed
+        run: pnpm db:seed
+
+      # The suite that matters: cross-tenant isolation walked from the live
+      # catalogue, plus the guard that fails the build if a new table arrives
+      # without row level security.
+      - name: Row level security and schema guards
+        run: pnpm db:test
+
+  build:
+    name: Typecheck and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck packages
+        run: |
+          pnpm --filter @platform/shared typecheck
+          pnpm --filter @platform/db typecheck
+
+      - name: Build the web app
+        run: pnpm --filter @platform/web build
+        env:
+          # Build-time placeholders. Nothing here reaches a real project; the
+          # app reads its real values at runtime.
+          NEXT_PUBLIC_SUPABASE_URL: http://localhost:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+          SUPABASE_SERVICE_ROLE_KEY: ci-placeholder
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
