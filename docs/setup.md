@@ -94,10 +94,17 @@ no Next.js app in it.
 on `@platform/db` and `@platform/shared`, which live in `packages/`. Without
 this, the install succeeds and the build fails on unresolved workspace imports.
 
-`apps/web/vercel.json` already sets the build and install commands to run from
-the repository root so pnpm resolves the workspace properly, and
-`next.config.mjs` sets `outputFileTracingRoot` so the workspace packages are
-actually traced into the deployed bundle.
+If you import the repository without setting Root Directory, the build fails
+with something like "No Next.js version detected", because Vercel is looking at
+the repository root where there is no app. That is the most common way this
+goes wrong, and changing the setting is the whole fix: Settings → General →
+Root Directory → `apps/web`, then redeploy.
+
+Install and build commands are left to Vercel, which handles pnpm workspaces
+natively: it runs the install at the workspace root and builds in the root
+directory. `next.config.mjs` sets `outputFileTracingRoot` so the workspace
+packages under `packages/` are traced into the deployed bundle rather than
+going missing at runtime.
 
 ### Environment variables
 
