@@ -1,0 +1,87 @@
+name: Migrate hosted database
+
+# Applies supabase/migrations to a hosted Supabase project.
+#
+# Manual only. Applying a schema change automatically on every merge means a
+# bad migration reaches production the moment someone clicks merge, with no
+# chance to look at it first. This asks to be run, and defaults to reporting
+# what it would do rather than doing it.
+#
+# The connection string lives in a repository secret, so it never appears in a
+# pull request, a log, or a conversation. Set it once:
+#
+#   Settings → Secrets and variables → Actions → New repository secret
+#     Name:  DATABASE_MIGRATION_URL
+#     Value: the DIRECT connection string (port 5432), not the pooler
+#
+# Migrations create schemas, roles and functions, which wants a real session
+# rather than a pooled one, which is why this is the direct connection and the
+# app's DATABASE_URL is not.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to do"
+        required: true
+        default: status
+        type: choice
+        options:
+          - status
+          - apply
+
+concurrency:
+  # Two migration runs at once against one database is how a half-applied
+  # schema happens. Never cancel one in flight; queue behind it.
+  group: migrate-hosted
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: ${{ inputs.mode == 'apply' && 'Apply migrations' || 'Report pending migrations' }}
+    runs-on: ubuntu-latest
+
+    # Add required reviewers to this environment in repository settings if you
+    # want a second pair of eyes before anything reaches production.
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Check the secret is set
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: |
+          if [ -z "$DATABASE_MIGRATION_URL" ]; then
+            echo "::error::DATABASE_MIGRATION_URL is not set. Add it under Settings → Secrets and variables → Actions, using the direct connection string on port 5432."
+            exit 1
+          fi
+
+      - run: pnpm install --frozen-lockfile
+
+      # Always run status first, whatever the mode. On an apply this is the
+      # record of what the database looked like beforehand, which is the thing
+      # you want when a migration goes wrong.
+      - name: Report current state
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: pnpm db:status
+
+      - name: Apply pending migrations
+        if: inputs.mode == 'apply'
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: pnpm db:migrate
+
+      - name: Confirm final state
+        if: inputs.mode == 'apply'
+        env:
+          DATABASE_MIGRATION_URL: ${{ secrets.DATABASE_MIGRATION_URL }}
+        run: pnpm db:status

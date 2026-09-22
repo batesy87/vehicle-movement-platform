@@ -12,6 +12,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "db:migrate": "pnpm --filter @platform/db migrate",
+    "db:status": "pnpm --filter @platform/db status",
     "db:reset": "pnpm --filter @platform/db reset",
     "db:seed": "pnpm --filter @platform/db seed",
     "db:test": "pnpm --filter @platform/db test"
@@ -22,6 +23,8 @@
     "prettier": "^3.4.2"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
