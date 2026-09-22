@@ -33,23 +33,44 @@ From **Project Settings → Database → Connection string**, collect two:
 
 ### Apply the schema
 
-Either the Supabase CLI:
+Three routes, all of which read the same files and write to the same ledger,
+so none of them will re-apply what another already did.
+
+**From GitHub, recommended.** Put the direct connection string in a repository
+secret once, under Settings → Secrets and variables → Actions:
+
+```
+Name:  DATABASE_MIGRATION_URL
+Value: the direct connection string, port 5432
+```
+
+Then run Actions → **Migrate hosted database** → Run workflow. It defaults to
+`status`, which reports what is applied and what is pending and changes
+nothing. Re-run with `apply` once the list looks right.
+
+This is the route worth setting up, because the password never leaves GitHub:
+not into a shell history, not into a chat, not into a log. The workflow prints
+the ledger before and after, so there is a record of what the database looked
+like going in, which is what you want when a migration misbehaves. Add required
+reviewers to the `production` environment if you want a second pair of eyes
+before anything lands.
+
+**From your machine.**
+
+```bash
+DATABASE_MIGRATION_URL='<direct connection string>' pnpm db:status   # dry run
+DATABASE_MIGRATION_URL='<direct connection string>' pnpm db:migrate  # apply
+```
+
+**With the Supabase CLI.**
 
 ```bash
 supabase link --project-ref <your-project-ref>
 supabase db push
 ```
 
-or this repo's runner, which reads the same files and writes to the same
-ledger:
-
-```bash
-DATABASE_MIGRATION_URL='<direct connection string>' pnpm db:migrate
-```
-
-Both work, and neither will re-apply what the other already did. Migrations
-live in `supabase/migrations/` precisely so there is one set of files rather
-than two.
+Migrations live in `supabase/migrations/` precisely so there is one set of
+files rather than two.
 
 Do **not** run `pnpm db:reset` against a hosted project. It refuses unless the
 host is localhost, but do not go looking for the override.

@@ -5,6 +5,7 @@
  * own transaction.
  *
  *   pnpm migrate            apply anything outstanding
+ *   pnpm status             list applied and pending, change nothing
  *   pnpm reset              drop and rebuild from scratch (local only)
  *
  * Migrations live under supabase/ and are named the way the Supabase CLI wants
@@ -40,6 +41,13 @@ if (!connectionString) {
 }
 
 const shouldReset = process.argv.includes("--reset");
+/**
+ * Read-only. Reports what is applied and what is pending without touching
+ * anything, including without creating the ledger table. Worth having before
+ * pointing this at a hosted project for the first time: it answers "what is
+ * about to happen" without committing to it.
+ */
+const statusOnly = process.argv.includes("--status");
 
 /** Filenames are <14-digit version>_<name>.sql, as the Supabase CLI requires. */
 function parseFilename(filename: string): { version: string; name: string } | null {
@@ -57,7 +65,54 @@ function isLocal(url: string): boolean {
   }
 }
 
+/** Lists applied and pending migrations. Opens no transaction and writes nothing. */
+async function reportStatus(client: pg.Client, files: string[]): Promise<void> {
+  // to_regclass rather than a create-if-missing, so asking the question cannot
+  // itself change the answer.
+  const { rows: ledger } = await client.query<{ present: string | null }>(
+    "select to_regclass('supabase_migrations.schema_migrations')::text as present",
+  );
+
+  const applied = new Set<string>();
+  if (ledger[0]?.present) {
+    const { rows } = await client.query<{ version: string }>(
+      "select version from supabase_migrations.schema_migrations",
+    );
+    for (const row of rows) applied.add(row.version);
+  } else {
+    console.log("No migration ledger yet: this database has never been migrated.\n");
+  }
+
+  let pending = 0;
+  for (const filename of files) {
+    const parsed = parseFilename(filename);
+    if (!parsed) continue;
+    const isApplied = applied.has(parsed.version);
+    if (!isApplied) pending += 1;
+    console.log(`  ${isApplied ? "applied" : "PENDING"}  ${filename}`);
+  }
+
+  // A version in the ledger with no matching file means the database is ahead
+  // of this checkout, which is worth knowing before applying anything.
+  const known = new Set(
+    files.map((f) => parseFilename(f)?.version).filter((v): v is string => Boolean(v)),
+  );
+  const orphans = [...applied].filter((v) => !known.has(v)).sort();
+
+  console.log(`\n${applied.size} applied, ${pending} pending.`);
+  if (orphans.length > 0) {
+    console.log(
+      `\nWarning: the database records ${orphans.length} migration(s) not present in this checkout:\n  ${orphans.join("\n  ")}\nThat usually means the branch is behind what has been deployed.`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
+  if (statusOnly && shouldReset) {
+    console.error("--status and --reset do the opposite of each other. Pick one.");
+    process.exit(1);
+  }
+
   // Checked before connecting, so a mistyped host fails on this rather than on
   // DNS, and so nothing is opened against a database we are about to refuse to
   // touch. Dropping every table is not something to do to a hosted project by
@@ -73,6 +128,12 @@ async function main(): Promise<void> {
   await client.connect();
 
   try {
+    if (statusOnly) {
+      const files = (await readdir(migrationsDir)).filter((f) => f.endsWith(".sql")).sort();
+      await reportStatus(client, files);
+      return;
+    }
+
     if (shouldReset) {
       console.log("Resetting schema...");
       // `app` and `public` are ours to rebuild, and the migration ledger goes

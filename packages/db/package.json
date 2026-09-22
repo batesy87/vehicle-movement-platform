@@ -11,6 +11,7 @@
   },
   "scripts": {
     "migrate": "tsx scripts/migrate.ts",
+    "status": "tsx scripts/migrate.ts --status",
     "reset": "tsx scripts/migrate.ts --reset",
     "seed": "tsx scripts/seed.ts",
     "test": "vitest run",

@@ -25,10 +25,20 @@ otherwise be invisible to every query the application writes.
 
 ```bash
 pnpm migrate          # apply anything outstanding
+pnpm status           # list applied and pending, change nothing
 pnpm reset            # drop and rebuild public and app, then apply everything
 pnpm seed             # two tenants, a shared driver, a two-leg consignment
 pnpm test             # 143 tests against a real Postgres
 ```
+
+`status` is read-only in the strict sense: it checks for the ledger with
+`to_regclass` rather than creating it, so asking the question cannot change the
+answer. It also warns when the database records a migration that is not in your
+checkout, which means the branch is behind what has been deployed.
+
+Against a hosted project, prefer the **Migrate hosted database** workflow over
+running either of these by hand. It reads the connection string from a
+repository secret, so the password stays in GitHub.
 
 `DATABASE_MIGRATION_URL` is used when set, falling back to `DATABASE_URL`.
 Migrating needs rights the application's own connection should not have.
