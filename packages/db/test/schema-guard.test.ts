@@ -20,7 +20,6 @@ const EXEMPT: Record<string, string> = {
   plans: "global reference data, deliberately world-readable",
   companies: "the tenant root; scoped by id, not by company_id",
   driver_profiles: "global driver identity, shared across tenants by design",
-  schema_migrations: "migration bookkeeping, no policies needed",
 };
 
 afterAll(async () => {
@@ -39,7 +38,7 @@ describe("row level security", () => {
       );
       return rows.map((r) => r.relname);
     });
-    expect(offenders.filter((t) => t !== "schema_migrations")).toEqual([]);
+    expect(offenders).toEqual([]);
   });
 
   it("is FORCED on every table in public", async () => {
@@ -57,7 +56,7 @@ describe("row level security", () => {
       );
       return rows.map((r) => r.relname);
     });
-    expect(offenders.filter((t) => t !== "schema_migrations")).toEqual([]);
+    expect(offenders).toEqual([]);
   });
 
   it("gives every protected table at least one policy", async () => {

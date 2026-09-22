@@ -28,7 +28,6 @@ const NOT_TENANT_SCOPED: Record<string, string> = {
   plans: "global reference data, public by design",
   companies: "the tenant itself, scoped by id rather than company_id",
   driver_profiles: "global driver identity, shared across tenants by design",
-  schema_migrations: "migration bookkeeping, not application data",
 };
 
 let companyA: SeededCompany;

@@ -1,0 +1,72 @@
+# Supabase project configuration.
+#
+# `supabase start` reads this to run the whole stack locally, and
+# `supabase link` uses project_id to connect this directory to a hosted
+# project. Migrations in ./migrations are shared by the CLI and by
+# `pnpm db:migrate`, which records what it applied in the same ledger the CLI
+# reads, so the two never try to apply the same file twice.
+
+# Set this to your project ref after running `supabase link`.
+project_id = "vehicle-movement-platform"
+
+[api]
+enabled = true
+port = 54321
+# Only `public` is exposed. The `app` schema holds the tenancy helpers and is
+# deliberately not reachable through the API.
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+# Match the hosted project. The schema uses ON DELETE SET NULL with a column
+# list, which needs 15 or later.
+major_version = 15
+
+[db.pooler]
+enabled = true
+port = 54329
+pool_mode = "transaction"
+default_pool_size = 20
+max_client_conn = 100
+
+[studio]
+enabled = true
+port = 54323
+
+# Catches outbound mail locally so invitation and reset emails can be read
+# without sending anything.
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+# Proof-of-delivery photos. Raised from the default because a walk-around set
+# is several full-resolution images.
+file_size_limit = "50MiB"
+
+[storage.buckets.custody-media]
+public = false
+file_size_limit = "50MiB"
+allowed_mime_types = ["image/jpeg", "image/png", "image/webp", "application/pdf"]
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+# Local only. Turn confirmations on for the hosted project.
+enable_confirmations = false
+
+[analytics]
+enabled = false

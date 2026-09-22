@@ -1,7 +1,7 @@
 /**
  * Domain enumerations.
  *
- * Every value here has a matching Postgres enum in packages/db/migrations.
+ * Every value here has a matching Postgres enum in supabase/migrations.
  * The `assertEnumParity` test in packages/db walks both and fails if they
  * drift, so this file and the database can never disagree silently.
  */

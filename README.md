@@ -46,6 +46,9 @@ too), or point `DATABASE_URL` at any Postgres 15+. The migrations create a
 minimal `auth` schema shim when one is not already there, so they run unchanged
 against both.
 
+Setting up hosted Supabase and Vercel projects is covered step by step in
+[docs/setup.md](docs/setup.md).
+
 ```bash
 pnpm db:migrate                   # apply migrations
 pnpm db:seed                      # two tenants and a driver who works for both
@@ -64,10 +67,11 @@ policy look fine.
 
 ```
 apps/web/                Next.js App Router: auth, onboarding, team, drivers
-packages/db/             migrations, RLS policies, Drizzle schema, seed, tests
+supabase/                config.toml and migrations (the schema itself)
+packages/db/             migration runner, Drizzle schema, seed, RLS tests
 packages/shared/         enums, plan features, validation, damage taxonomy
 packages/config/         shared tsconfig
-docs/                    tenancy model and data model
+docs/                    setup, tenancy model, data model
 ```
 
 ## The part that matters
@@ -117,10 +121,11 @@ since the intention is to stay near zero until there is revenue:
 
 ## Conventions
 
-- **The SQL is the source of truth.** `packages/db/migrations/*.sql` holds the
-  schema, the policies, the triggers and the constraints. The Drizzle
-  definitions exist so queries are typed, and a parity test compares the two in
-  both directions.
+- **The SQL is the source of truth.** `supabase/migrations/*.sql` holds the
+  schema, the policies, the triggers and the constraints. It lives under
+  `supabase/` so the CLI and `pnpm db:migrate` share one set of files and one
+  ledger. The Drizzle definitions exist so queries are typed, and a parity test
+  compares the two in both directions.
 - **Migrations are append-only.** The runner checksums what it applied and
   refuses to continue if a file changed underneath it. Add a new migration
   rather than editing an old one; `--reset` is for development.
