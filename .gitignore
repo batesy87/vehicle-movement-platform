@@ -1,0 +1,36 @@
+node_modules/
+.pnpm-store/
+dist/
+build/
+.next/
+out/
+.turbo/
+
+# Environment: never commit real values. .env.example is the only tracked env file.
+.env
+.env.*
+!.env.example
+
+# Local Supabase / Docker state
+supabase/.temp/
+supabase/.branches/
+.docker-data/
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test output
+coverage/
+*.log
+
+# Credentials of any kind. The legacy repos committed service-account JSON;
+# this repo must never do the same.
+*.pem
+*.key
+*-adminsdk*.json
+google-services.json
+GoogleService-Info.plist
+service-account*.json
