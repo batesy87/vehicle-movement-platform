@@ -215,3 +215,70 @@ bypassed. Each checks `auth.uid()` and the caller's role itself and fails
 closed on a null, which is what `tenancy.test.ts` covers.
 
 `anon` holds execute on none of them, which is the part that was worth fixing.
+
+## Where the active company comes from
+
+Membership and the active company are both halves of the tenant rule, and for a
+while they were expressed in different currencies.
+
+Membership has always been a property of identity. `app.has_company()` resolves
+`auth.uid()` against `company_users` and `driver_company_links`, so any caller
+presenting a token gets the same answer, and revoking a link takes effect on
+the next statement no matter who is asking.
+
+The active company was a property of the connection: a setting applied by
+`withTenantSession` inside a transaction it owns. That works and it fails
+closed, but it means half the rule can only be satisfied by a caller holding a
+server-side Postgres session. Anything else, a mobile client capturing proof of
+delivery offline, an edge function, a background worker, a second service,
+either reimplements that transport or silently cannot write. Welding a security
+rule to a transport is the part that ages badly.
+
+Since `...150000_active_company_from_identity`, `app.active_company_id()` reads
+two sources:
+
+```sql
+coalesce(
+  nullif(current_setting('app.active_company_id', true), '')::uuid,
+  nullif(auth.jwt() -> 'app_metadata' ->> 'active_company_id', '')::uuid
+)
+```
+
+The setting is an override, settable only over a direct connection, which only
+our own server holds. It is how a job or a support tool pins the company it is
+acting for. The claim is the default, written through the admin API, signed by
+GoTrue, and readable by whatever client presents it. Both are meant to stay.
+
+This is not the JWT design rejected above, and the difference is worth being
+precise about. That design put *membership* in the token, which goes stale, so
+revoking someone left their token still asserting they belonged. This puts the
+*selection* in the token. `can_write_company()` is unchanged and still reads
+`active = target AND app.has_company(target)`, so a claim names a company and
+proves nothing about it. `active-company-source.test.ts` holds that down from
+three directions: a stranger naming a company gets nothing, a member of a
+different company naming it gets nothing, and a driver whose link goes inactive
+stops seeing it mid-token.
+
+### The application must not choose on the user's behalf
+
+The database refuses to guess which company a write belongs to. For a while the
+application guessed for it.
+
+`lib/session.ts` fell back to `memberships[0]` when no company had been chosen,
+and `my_memberships()` orders by company name, so "the first one" meant
+"whichever sorts first alphabetically". A dispatcher for two operators who had
+not touched the switcher, or whose cookie had lapsed, silently got one picked
+for them.
+
+Writes against existing rows still failed closed, because the policy compares
+the active company against the row's own and refuses a mismatch. New rows were
+the problem. There the active company is the destination, so there is nothing
+for the database to disagree with, and an invitation lands in a company nobody
+selected. `team/actions.ts` and `drivers/actions.ts` both write using it.
+
+The rule now lives in `chooseActiveCompany`, tested without a database: honour
+a valid choice, default only when there is exactly one membership and therefore
+no choice to make, and otherwise return null so the caller can ask. A null
+active company with memberships present sends the user to `/select-company`,
+which is deliberately not onboarding: someone who needs to say which of their
+three companies they meant should not be offered a form for creating a fourth.

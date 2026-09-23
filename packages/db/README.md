@@ -28,7 +28,7 @@ pnpm migrate          # apply anything outstanding
 pnpm status           # list applied and pending, change nothing
 pnpm reset            # drop and rebuild public and app, then apply everything
 pnpm seed             # two tenants, a shared driver, a two-leg consignment
-pnpm test             # 147 tests against a real Postgres
+pnpm test             # 164 tests against a real Postgres
 ```
 
 `status` is read-only in the strict sense: it checks for the ledger with
@@ -77,6 +77,7 @@ that schema holds the user accounts.
 | `...120010_reference_data` | plan tiers |
 | `...140000_restrict_anon_and_authenticated` | undoes the platform's default grants to `anon` and `authenticated` |
 | `...140001_pin_helper_search_paths` | pins `search_path` on the ten `SECURITY INVOKER` helpers |
+| `...150000_active_company_from_identity` | the active company may come from the access token, not only from the connection |
 
 Policies normally sit directly beneath the table they guard. Two places break
 that, both because Postgres validates SQL function bodies at creation time and
@@ -134,10 +135,22 @@ files, so do not point `DATABASE_URL` at anything you care about.
   per-tenant reference numbering.
 - **`schema-parity`** compares enums, Drizzle tables and plan features against
   the database.
+- **`active-company-source`** covers the two places `app.active_company_id()`
+  can read from, the precedence between them, and the part that matters: a
+  token naming a company gets a stranger nothing, gets a member of a different
+  company nothing, and stops working the moment the link behind it goes
+  inactive. `actingAsToken` in the harness is the PostgREST-shaped caller,
+  setting claims and deliberately not setting the connection override.
+- **`choose-active-company`** is pure and needs no database. It pins the rule
+  that the application must not pick a company for a user who belongs to
+  several, because `my_memberships()` orders by name and "the first one" means
+  "whichever sorts first".
 
-Four real problems came out of writing these, all described in
+Five real problems came out of writing these, all described in
 `docs/tenancy.md`: a role predicate returning NULL where `plpgsql` needed a
 boolean, a driver-visibility policy that did not re-check membership, the
 platform's default grants leaving `anon` and `authenticated` holding every
-privilege including `TRUNCATE`, and two grants that no policy had ever
-permitted.
+privilege including `TRUNCATE`, two grants that no policy had ever permitted,
+and the application quietly choosing an active company for users who belong to
+more than one, which defeated the explicit-choice rule the schema exists to
+enforce.
