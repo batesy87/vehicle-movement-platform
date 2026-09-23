@@ -107,6 +107,12 @@ See [docs/tenancy.md](docs/tenancy.md) for how the model works and why it
 departs from a JWT claim, and [docs/schema.md](docs/schema.md) for the data
 model.
 
+[docs/active-company-in-the-token.md](docs/active-company-in-the-token.md) is a
+design note rather than a description of what exists. It covers what it would
+take to drop the direct Postgres connection and reach the database through
+supabase-js, and is worth reading before anyone assumes the current transport
+is load-bearing.
+
 ## Deployment
 
 Built for Supabase (Postgres, Auth, Storage) and Vercel. Step-by-step setup is
