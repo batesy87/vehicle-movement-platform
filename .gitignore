@@ -34,3 +34,6 @@ coverage/
 google-services.json
 GoogleService-Info.plist
 service-account*.json
+
+# TypeScript incremental build state, per-machine and never useful in review.
+*.tsbuildinfo
