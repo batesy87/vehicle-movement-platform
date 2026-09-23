@@ -150,11 +150,28 @@ per invocation, behind the transaction pooler, is the right shape.
 `DATABASE_MIGRATION_URL` is deliberately absent. Vercel does not run
 migrations; you do, from your machine or CI, before deploying a schema change.
 
-### The Supabase integration
+### If you created the project through the Vercel integration
 
-The Vercel marketplace has a Supabase integration that syncs the URL and keys
-automatically. It is convenient and it does not set `DATABASE_URL` or
-`DATABASE_POOL_MAX`, so add those by hand either way.
+The Vercel marketplace has a Supabase integration that creates the project and
+syncs the URL and keys for you. If you used it, most of the table above is
+already filled in and you do not need to touch it.
+
+It does not set `DATABASE_URL`. It sets its own pair instead:
+
+| It provisions | Which is |
+|---|---|
+| `POSTGRES_URL` | the pooled connection, what the app wants |
+| `POSTGRES_URL_NON_POOLING` | the direct connection, what migrations want |
+
+The app reads both of those as fallbacks, so an integration-created project
+works without anyone copying a connection string by hand. `DATABASE_URL` still
+wins where it is set, so setting it deliberately keeps control.
+
+This is worth knowing because the failure it used to cause looked nothing like
+its cause. Everything appeared configured, the build succeeded, and the first
+page that touched the database failed at runtime with a missing variable
+nobody had been told to set. If you see that error now, it names what it looked
+for and what it found.
 
 ## 3. Check it worked
 

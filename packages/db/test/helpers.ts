@@ -14,6 +14,39 @@ const connectionString =
   process.env.DATABASE_URL ??
   "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
+// POSTGRES_URL is deliberately NOT read here, unlike in src/client.ts and the
+// migration runner. Those want to find a connection; this suite wants to be
+// hard to point somewhere it should not go. A platform-provisioned variable
+// sitting in a shell is exactly how a test run finds production.
+
+function isLocal(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+}
+
+// This suite calls truncateAll(). Against a real project that is not a failing
+// test, it is data loss, and the failure mode is quiet: everything passes, and
+// the tables are empty afterwards. The migration runner already refuses to
+// --reset a non-local host for the same reason; this is the same guard on the
+// other command that empties tables.
+//
+// Checked at module load so it fails before a connection is opened, and so it
+// fails the same way whichever test file vitest happens to load first.
+if (!isLocal(connectionString) && !process.env.ALLOW_REMOTE_TEST_DATABASE) {
+  throw new Error(
+    [
+      "Refusing to run the test suite against a non-local database.",
+      "These tests truncate every table in public between files.",
+      "Point DATABASE_TEST_URL at a local Postgres, or set",
+      "ALLOW_REMOTE_TEST_DATABASE=1 if you genuinely mean to empty that database.",
+    ].join(" "),
+  );
+}
+
 export const adminPool = new pg.Pool({ connectionString, max: 5 });
 
 /** Runs SQL as the owning role, bypassing every policy. Setup only. */

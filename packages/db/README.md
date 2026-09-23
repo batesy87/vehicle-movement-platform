@@ -40,8 +40,18 @@ Against a hosted project, prefer the **Migrate hosted database** workflow over
 running either of these by hand. It reads the connection string from a
 repository secret, so the password stays in GitHub.
 
-`DATABASE_MIGRATION_URL` is used when set, falling back to `DATABASE_URL`.
-Migrating needs rights the application's own connection should not have.
+Connection strings are resolved in preference order. Migrations want a direct
+session, so they read `DATABASE_MIGRATION_URL`, then
+`POSTGRES_URL_NON_POOLING`, then the pooled ones as a last resort. The
+application wants the pooled one, so it reads `DATABASE_URL` then
+`POSTGRES_URL`. The `POSTGRES_*` names are what the Vercel Supabase
+integration provisions when it creates a project.
+
+The test harness deliberately reads neither `POSTGRES_URL`. It also refuses to
+run against a non-local host unless `ALLOW_REMOTE_TEST_DATABASE` is set,
+because the suite truncates every table in `public` between files and a
+platform-provisioned variable sitting in a shell is exactly how a test run
+finds production.
 
 The runner records a sha256 of every file it applies, in
 `supabase_migrations.runner_checksums`, and refuses to continue if one changed
