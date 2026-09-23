@@ -1,8 +1,10 @@
 # Moving the active company into the token
 
-A design note, not a decision that has been taken. It describes what it would
-take to drop the direct Postgres connection and reach the database through
-supabase-js the way the platform expects, and what that costs.
+A design note. The schema half of it has been done, in migration
+`...150000_active_company_from_identity`; the application half has not, and may
+never need to be. It describes what it would take to drop the direct Postgres
+connection and reach the database through supabase-js the way the platform
+expects, and what that costs.
 
 Read `tenancy.md` first if you have not. This note assumes you know why
 membership is derived from tables rather than carried in a claim, because the
@@ -136,17 +138,32 @@ That is the entire schema side of this.
 Note the `set search_path`, which migration `...140001` added to this function.
 Keep it on the replacement or the guard will fail the build.
 
-## The coexistence period, which is what makes this safe
+## Two sources is the end state, not scaffolding
 
-The `coalesce` above is the important part of this whole note. With both
-sources read, both data paths work at the same time. A page still using
-`withTenantSession` sets the GUC and wins. A page moved to supabase-js sets
-nothing and falls through to the claim. They can run side by side, in
-production, for as long as you like.
+An earlier draft of this note called the `coalesce` a coexistence mechanism to
+be removed once the migration finished. That was wrong, and the correction is
+the most useful thing here.
 
-That turns a rewrite into a migration you can stop halfway through. Move one
-page, deploy it, watch it. Move the next. If something is wrong, the page goes
-back to the pooled path without a schema change and without a rollback.
+The defect being fixed is not that the application uses the wrong client
+library. It is that the tenant rule was expressed in two different currencies.
+Membership is a property of identity, so `app.has_company()` answers the same
+way for any caller presenting a token. The active company was a property of the
+connection, so only a caller holding a server-side Postgres session could
+satisfy it. Half a security rule welded to a transport is the thing that ages
+badly: every future caller either reimplements that transport or silently
+cannot write.
+
+Reading both sources fixes that permanently. The claim is the default, carried
+by the identity, available to any caller. The setting is an override, available
+only over a direct connection, which is how a background job, a support tool or
+an impersonating process pins the company it is acting for. Both are meant to
+stay. Removing either would make the design worse.
+
+The migration convenience falls out of that rather than being the point. Both
+data paths do work at once, so a page still using `withTenantSession` sets the
+override and wins while a page moved to supabase-js falls through to the claim.
+Move one page, deploy it, watch it, move the next, and put one back without a
+schema change if it misbehaves.
 
 Both sources are trusted. The GUC can only be set over a direct connection,
 which only the server has. The claim can only be set by GoTrue signing a token.
@@ -251,40 +268,44 @@ meaning anything.
 
 ## Order of work
 
-The schema change comes first and on its own, because it is additive and
-reversible. Add `auth.jwt()` to the shim and rewrite `app.active_company_id()`
-with the `coalesce`. Nothing behaves differently at this point, since no token
-carries the claim yet. Ship it, confirm the tests still pass, confirm the app
-still works.
+**Done.** The schema change, in `...150000_active_company_from_identity`.
+`auth.jwt()` added to the bare-Postgres shim, `app.active_company_id()` reading
+the override first and the claim second. Nothing behaves differently yet, since
+no token carries the claim. `active-company-source.test.ts` covers both
+sources, the precedence between them, and the three ways a claim naming a
+company you do not belong to gets you nothing.
 
-Then the writing side. Add the server action that sets `app_metadata` and
-refreshes the session, and wire it into onboarding and the company switcher.
-Now tokens carry the claim while the GUC still wins wherever it is set, so
-still nothing changes behaviourally.
+**Next, whenever it is wanted.** The writing side: a server action that sets
+`app_metadata` through the admin API and refreshes the session, wired into
+onboarding and the company picker. At that point tokens carry the claim while
+the override still wins wherever it is set, so still nothing changes
+behaviourally. Verify the merge-or-replace question above before relying on it.
 
-Then move pages one at a time, starting with a read-only one. `team/page.tsx`
-is the obvious first, being two straightforward reads. Deploy between each.
+**Then, only if a page needs it.** Move pages one at a time, starting with a
+read-only one; `team/page.tsx` is the obvious first, being two straightforward
+reads. Deploy between each.
 
 `lib/session.ts` and the cookie go last, once nothing reads them.
 
-Remove the `coalesce` fallback and `DATABASE_URL` only when the last
-`withTenantSession` call site is gone, and keep `DATABASE_MIGRATION_URL`
-regardless, since migrations always want a direct session.
+`DATABASE_URL` can go once the last `withTenantSession` call site does. The
+`coalesce` stays regardless, for the reason in the section above, as does
+`DATABASE_MIGRATION_URL`, since migrations always want a direct session.
 
 ## Recommendation
 
-Do the first step soon and the rest when there is a reason to.
+The schema change was worth doing on its own terms and is done. It was never
+really about supabase-js: it was about half the tenant rule being satisfiable
+only by one kind of caller, which is a defect whether or not anything else ever
+changes.
 
-The schema change is small, additive, reversible, and it is the piece that gets
-more expensive to make later as application code accumulates around the current
-shape. Making `app.active_company_id()` read both sources costs one migration
-and commits you to nothing.
-
-The rest is not urgent. The pooled path works and is tested, and rewriting
-fourteen queries to remove an environment variable is not a good trade on its
-own. It becomes a good trade the moment connection handling causes a production
-problem, and at that point the groundwork will already be in place and the
-migration can happen one page at a time instead of as an emergency.
+The rest is not urgent and may never be justified. The pooled path works, it is
+tested, and rewriting fourteen queries to remove an environment variable is a
+poor trade taken alone. Two things would change that. A mobile app for drivers
+is the likely one: offline capture and photo upload want to talk to Supabase
+directly, and such a client cannot hold a server-side connection, so the token
+path stops being a nicety. Connection handling causing a production problem is
+the other. In either case the groundwork is in place and pages can move one at
+a time rather than as an emergency.
 
 Take the stored `app_metadata` version. The hook solves a problem this
 application does not currently have, and it costs a grant into tenant tables

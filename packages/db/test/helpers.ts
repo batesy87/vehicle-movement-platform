@@ -64,6 +64,44 @@ export async function actingAs<T>(
 }
 
 /**
+ * Runs SQL the way PostgREST would: the caller's real access token and nothing
+ * else. No server-side override is set, so app.active_company_id() has only the
+ * token's app_metadata to read.
+ *
+ * This is the other half of actingAs. That one mirrors withTenantSession, which
+ * holds its own connection and pins the company on it. This one mirrors every
+ * caller that cannot, which after 0013 is the case the tenant rule also has to
+ * cover. A suite that only exercised actingAs would pass while the claim path
+ * was broken.
+ */
+export async function actingAsToken<T>(
+  who: { userId: string; activeCompanyId?: string | null },
+  fn: (tx: pg.PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await adminPool.connect();
+  try {
+    await client.query("begin");
+    await client.query("set local role authenticated");
+    await client.query("select set_config('request.jwt.claims', $1, true)", [
+      JSON.stringify({
+        sub: who.userId,
+        role: "authenticated",
+        app_metadata: who.activeCompanyId ? { active_company_id: who.activeCompanyId } : {},
+      }),
+    ]);
+    // Deliberately absent: no set_config('app.active_company_id', ...).
+    const result = await fn(client);
+    await client.query("commit");
+    return result;
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Asserts that a statement is refused.
  *
  * Deliberately accepts any denial: a row level security violation, a

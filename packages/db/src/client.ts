@@ -36,6 +36,18 @@ export interface TenantSession {
    * The company this request is acting for. Required for any write: with it
    * unset, every INSERT, UPDATE and DELETE policy in the schema evaluates
    * false. Reads still work across every company the user belongs to.
+   *
+   * Since migration 0013 this is an override rather than the only source.
+   * `app.active_company_id()` reads it first and falls back to the selection
+   * carried in the access token, which is what lets a caller that cannot hold
+   * a Postgres session satisfy the same rule.
+   *
+   * Leaving it unset still means no writes here, because this function builds
+   * `request.jwt.claims` itself as {sub, role} and there is no app_metadata in
+   * it to fall back to. That is load-bearing: if this ever passes a real token
+   * through instead, a call that means "no override" starts inheriting the
+   * user's own selection, and every call site that relied on omission meaning
+   * read-only would quietly change behaviour.
    */
   companyId?: string | null;
 }
