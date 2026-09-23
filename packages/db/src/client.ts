@@ -56,15 +56,51 @@ export type Queryable = Pick<pg.PoolClient, "query">;
 
 let pool: pg.Pool | undefined;
 
+/**
+ * The pooled connection string, in preference order.
+ *
+ * POSTGRES_URL is not an alias we invented. The Vercel Supabase integration
+ * provisions it, along with POSTGRES_URL_NON_POOLING, when a project is
+ * created that way. Reading it means a project set up through the integration
+ * works without anyone being told to copy a connection string by hand, which
+ * is the kind of instruction that gets missed precisely because everything
+ * else appeared to configure itself.
+ *
+ * DATABASE_URL still wins where both exist, so anyone who set it deliberately
+ * keeps control.
+ */
+function connectionString(): string {
+  const found = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+  if (found) return found;
+
+  // Naming what was looked for and what was present, because "not set" on its
+  // own sends people to check the variable they already checked. Names only:
+  // a connection string holds a password and must never reach a log.
+  const looked = ["DATABASE_URL", "POSTGRES_URL"];
+  const alsoSeen = ["POSTGRES_URL_NON_POOLING", "DATABASE_MIGRATION_URL"].filter(
+    (name) => process.env[name],
+  );
+
+  throw new Error(
+    [
+      `No database connection string. Looked for ${looked.join(" then ")}.`,
+      alsoSeen.length > 0
+        ? `${alsoSeen.join(" and ")} is set but is the direct connection, which the app should not use; set DATABASE_URL to the transaction pooler (port 6543).`
+        : "On Vercel, check the variable exists in the environment you are deploying (Production and Preview are separate) and redeploy, since variables only reach deployments created after they are added.",
+    ].join(" "),
+  );
+}
+
 export function getPool(): pg.Pool {
   if (!pool) {
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
-      throw new Error("DATABASE_URL is not set.");
-    }
     pool = new pg.Pool({
-      connectionString,
-      max: Number(process.env.DATABASE_POOL_MAX ?? 10),
+      connectionString: connectionString(),
+      // One connection per invocation on a serverless platform. Each
+      // invocation is its own process, so a default of ten multiplies out fast
+      // behind the pooler. Defaulted rather than required, because the setup
+      // step most likely to be missed should not be the one that exhausts
+      // connections under load.
+      max: Number(process.env.DATABASE_POOL_MAX ?? (process.env.VERCEL ? 1 : 10)),
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
     });

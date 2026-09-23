@@ -33,10 +33,23 @@ import pg from "pg";
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(here, "..", "..", "..", "supabase", "migrations");
 
-const connectionString = process.env.DATABASE_MIGRATION_URL ?? process.env.DATABASE_URL;
+/**
+ * Migrations want a direct session, not a pooled one: they create schemas,
+ * roles and functions, and a transaction pooler is the wrong shape for that.
+ * So the direct variables come first, including POSTGRES_URL_NON_POOLING,
+ * which the Vercel Supabase integration provisions when it creates a project.
+ * The pooled ones are last resorts rather than equals.
+ */
+const connectionString =
+  process.env.DATABASE_MIGRATION_URL ??
+  process.env.POSTGRES_URL_NON_POOLING ??
+  process.env.DATABASE_URL ??
+  process.env.POSTGRES_URL;
 
 if (!connectionString) {
-  console.error("Set DATABASE_MIGRATION_URL or DATABASE_URL before running migrations.");
+  console.error(
+    "No database connection string. Looked for DATABASE_MIGRATION_URL, POSTGRES_URL_NON_POOLING, DATABASE_URL, POSTGRES_URL.",
+  );
   process.exit(1);
 }
 
