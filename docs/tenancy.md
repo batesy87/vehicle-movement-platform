@@ -160,3 +160,58 @@ This is enforced in `driver_profiles_select_linked_companies`, which matches
 only links with `status = 'active'`. An invited-but-not-accepted link shows in
 the drivers list with null columns, which is the consent boundary made visible
 in the UI rather than hidden behind it.
+
+## What the platform defaults gave away
+
+Two things were true on the hosted project that were not true locally, and
+neither was visible in the migrations that were supposed to control them. Both
+are fixed in `...140000_restrict_anon_and_authenticated` and
+`...140001_pin_helper_search_paths`; they are written up here because the shape
+of the mistake is worth remembering, not because anything is outstanding.
+
+Supabase ships default privileges granting `ALL` on new tables to `anon` and
+`authenticated`. Every table these migrations create was therefore born with
+insert, select, update, delete, truncate, references, trigger and maintain
+granted to both roles. Each table's own `revoke all ... from public` did not
+touch that, because `PUBLIC` and `anon` are different grantees, so the careful
+per-table grants that follow were adding privileges to a set that already held
+everything. On a bare Postgres there are no such defaults, so the local
+database and CI both showed exactly the intended matrix and nothing was wrong
+to find.
+
+Most of it was contained by row level security, which does not care what the
+table grant says. `TRUNCATE` is the exception and the reason this mattered:
+it is not subject to row level security at all. `audit_log`, `custody_events`,
+`media_objects` and `leg_location_points` deliberately have no delete policy,
+because evidence that the accused party can remove is not evidence. A truncate
+grant made that promise unenforceable for anyone holding it. Not through
+PostgREST, which has no TRUNCATE verb, but `withTenantSession` runs application
+SQL as `authenticated` in a real session where it very much applies.
+
+The second was `search_path`. The `SECURITY DEFINER` functions pin theirs and
+the guard checks it, but the ten `app` helpers are `SECURITY INVOKER` and so
+sat outside both. That reads as harmless, since an invoker function runs as the
+caller and crosses no privilege boundary. It is not harmless here, because
+those ten helpers are the predicates every policy in this schema is written in
+terms of. The question is not whether a caller gains privileges they lacked,
+it is whether a caller can change the answer `app.has_company()` gives about
+them, and that answer is the tenant boundary.
+
+The guard now asserts both, so a regression fails in CI. Note what that costs:
+both new assertions pass trivially against a local Postgres, because neither
+condition can arise there. They are pinning intent rather than reproducing the
+platform, and the lesson is the one the isolation suite already assumes, that
+a control which cannot be violated in the environment you test in is a control
+you are not actually testing.
+
+### One advisor finding accepted
+
+Supabase's linter reports `authenticated_security_definer_function_executable`
+for the six RPCs in `...120009_rpc`. That is intentional. They are the signup,
+invitation and membership entry points, and a signed-in user has to be able to
+call them, so the alternative would be an application-layer gate in front of
+SQL that already enforces the same rules in the one place that cannot be
+bypassed. Each checks `auth.uid()` and the caller's role itself and fails
+closed on a null, which is what `tenancy.test.ts` covers.
+
+`anon` holds execute on none of them, which is the part that was worth fixing.

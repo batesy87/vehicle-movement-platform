@@ -61,11 +61,30 @@ create schema if not exists app;
 -- ----------------------------------------------------------------------------
 create schema if not exists auth;
 
-create table if not exists auth.users (
-  id         uuid primary key default gen_random_uuid(),
-  email      text,
-  created_at timestamptz not null default now()
-);
+-- The stand-in table is created only when there is genuinely no auth.users,
+-- which means a bare Postgres.
+--
+-- `create table if not exists auth.users` looks like it would already be a
+-- no-op on Supabase, and it is not. IF NOT EXISTS does not short-circuit the
+-- permission check: the auth schema is owned by supabase_admin, the migration
+-- runs as postgres, and the statement fails with
+--
+--     42501: permission denied for schema auth
+--
+-- before it ever notices the table is there. Checking first is the difference
+-- between these migrations running on a real project and failing on the very
+-- first one.
+do $$
+begin
+  if to_regclass('auth.users') is null then
+    create table auth.users (
+      id         uuid primary key default gen_random_uuid(),
+      email      text,
+      created_at timestamptz not null default now()
+    );
+  end if;
+end
+$$;
 
 do $$
 begin

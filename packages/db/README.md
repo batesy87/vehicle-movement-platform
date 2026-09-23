@@ -28,7 +28,7 @@ pnpm migrate          # apply anything outstanding
 pnpm status           # list applied and pending, change nothing
 pnpm reset            # drop and rebuild public and app, then apply everything
 pnpm seed             # two tenants, a shared driver, a two-leg consignment
-pnpm test             # 143 tests against a real Postgres
+pnpm test             # 147 tests against a real Postgres
 ```
 
 `status` is read-only in the strict sense: it checks for the ledger with
@@ -43,10 +43,20 @@ repository secret, so the password stays in GitHub.
 `DATABASE_MIGRATION_URL` is used when set, falling back to `DATABASE_URL`.
 Migrating needs rights the application's own connection should not have.
 
-The runner records a checksum of every file it applies and refuses to continue
-if one changed afterwards. That is not pedantry: a silently edited migration
-means the database and the repository disagree about what the schema is. Add a
-new file instead; `--reset` exists for development.
+The runner records a sha256 of every file it applies, in
+`supabase_migrations.runner_checksums`, and refuses to continue if one changed
+afterwards. That is not pedantry: a silently edited migration means the
+database and the repository disagree about what the schema is. Add a new file
+instead; `--reset` exists for development.
+
+The checksums live in their own table rather than in the ledger's `statements`
+column, because that column is not ours. The CLI splits a file into one array
+element per statement and the MCP tooling stores the whole file minus its
+trailing newline, so comparing either against the file on disk reports a change
+that did not happen. A drift check that cries wolf on every hosted project gets
+deleted, which is worse than not having one. A version present in the ledger
+but absent from the checksum table was applied by another tool; the run says so
+and does not check it.
 
 `reset` drops `public` and `app` but never `auth`. On a real Supabase project
 that schema holds the user accounts.
@@ -65,6 +75,8 @@ that schema holds the user accounts.
 | `...120008_billing_and_audit` | invoices, usage metering, audit log |
 | `...120009_rpc` | signup, driver invitation, invitation acceptance |
 | `...120010_reference_data` | plan tiers |
+| `...140000_restrict_anon_and_authenticated` | undoes the platform's default grants to `anon` and `authenticated` |
+| `...140001_pin_helper_search_paths` | pins `search_path` on the ten `SECURITY INVOKER` helpers |
 
 Policies normally sit directly beneath the table they guard. Two places break
 that, both because Postgres validates SQL function bodies at creation time and
@@ -109,8 +121,13 @@ files, so do not point `DATABASE_URL` at anything you care about.
   `WITH CHECK (true)`, no `FOR ALL`, no policy granted to `PUBLIC`, a
   `WITH CHECK` on every insert and update, a non-nullable `company_id` outside
   four documented exceptions, `company_id` carried through every foreign key
-  between tenant tables, a pinned `search_path` on every `SECURITY DEFINER`
-  function, and no delete policy on the evidence tables.
+  between tenant tables, a pinned `search_path` on every function in `app` and
+  `public` rather than only the `SECURITY DEFINER` ones, and no delete policy
+  on the evidence tables. It also pins the privilege matrix: `anon` holds
+  nothing but `select` on `plans`, `TRUNCATE` is held by no policy-bound role,
+  and `authenticated` has no write privilege on a table with no policy for it.
+  Those three pass trivially on a bare Postgres, where the platform defaults
+  that caused them cannot exist. They are there to fail on Supabase.
 - **`tenancy`** covers behaviour: a driver spanning two companies, revocation
   taking effect on the next statement, a driver recording custody only for
   their own legs, staff role boundaries, both driver-invitation paths, and
@@ -118,6 +135,9 @@ files, so do not point `DATABASE_URL` at anything you care about.
 - **`schema-parity`** compares enums, Drizzle tables and plan features against
   the database.
 
-Two real bugs came out of writing these, both described in `docs/tenancy.md`:
-a role predicate returning NULL where `plpgsql` needed a boolean, and a
-driver-visibility policy that did not re-check membership.
+Four real problems came out of writing these, all described in
+`docs/tenancy.md`: a role predicate returning NULL where `plpgsql` needed a
+boolean, a driver-visibility policy that did not re-check membership, the
+platform's default grants leaving `anon` and `authenticated` holding every
+privilege including `TRUNCATE`, and two grants that no policy had ever
+permitted.

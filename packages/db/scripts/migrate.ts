@@ -167,6 +167,25 @@ async function main(): Promise<void> {
         add column if not exists name text;
     `);
 
+    // Drift detection lives here rather than in the ledger's `statements`
+    // column, because that column is not ours. The Supabase CLI splits a file
+    // into one array element per statement, and the MCP tooling stores the
+    // whole file but strips the trailing newline. Comparing a file against
+    // either one reports a change that did not happen, which is worse than not
+    // checking: a check that cries wolf on every hosted project gets deleted.
+    //
+    // So: the ledger stays the shared answer to "is this applied", read and
+    // written by every tool. This table is the private answer to "is it still
+    // the file we applied", written only here. A version missing from it was
+    // applied by something else and simply is not checked.
+    await client.query(`
+      create table if not exists supabase_migrations.runner_checksums (
+        version    text primary key,
+        sha256     text not null,
+        applied_at timestamptz not null default now()
+      );
+    `);
+
     const files = (await readdir(migrationsDir)).filter((f) => f.endsWith(".sql")).sort();
 
     const malformed = files.filter((f) => parseFilename(f) === null);
@@ -176,23 +195,31 @@ async function main(): Promise<void> {
       );
     }
 
-    const { rows: applied } = await client.query<{ version: string; statements: string[] | null }>(
-      "select version, statements from supabase_migrations.schema_migrations",
+    const { rows: applied } = await client.query<{ version: string }>(
+      "select version from supabase_migrations.schema_migrations",
     );
-    const appliedByVersion = new Map(applied.map((r) => [r.version, r.statements?.[0] ?? null]));
+    const appliedVersions = new Set(applied.map((r) => r.version));
+
+    const { rows: sums } = await client.query<{ version: string; sha256: string }>(
+      "select version, sha256 from supabase_migrations.runner_checksums",
+    );
+    const checksums = new Map(sums.map((r) => [r.version, r.sha256]));
 
     let ran = 0;
+    let unverified = 0;
 
     for (const filename of files) {
       const { version, name } = parseFilename(filename)!;
       const sql = await readFile(join(migrationsDir, filename), "utf8");
 
-      if (appliedByVersion.has(version)) {
-        const previous = appliedByVersion.get(version);
-        // Only meaningful for migrations this runner applied; ones applied by
-        // the CLI store their statements split differently, so a mismatch
-        // there is not evidence of tampering.
-        if (previous !== null && previous !== undefined && previous !== sql) {
+      if (appliedVersions.has(version)) {
+        const previous = checksums.get(version);
+        if (previous === undefined) {
+          // Applied by the CLI, the dashboard or the MCP tooling. We have
+          // nothing of our own to compare against, so we say so rather than
+          // guessing.
+          unverified += 1;
+        } else if (previous !== checksum(sql)) {
           throw new Error(
             `${filename} has changed since it was applied. Add a new migration instead of editing this one, or run with --reset in development.`,
           );
@@ -209,6 +236,12 @@ async function main(): Promise<void> {
            values ($1, $2, $3)`,
           [version, name, [sql]],
         );
+        await client.query(
+          `insert into supabase_migrations.runner_checksums (version, sha256)
+           values ($1, $2)
+           on conflict (version) do update set sha256 = excluded.sha256, applied_at = now()`,
+          [version, checksum(sql)],
+        );
         await client.query("commit");
         console.log("ok");
         ran += 1;
@@ -220,6 +253,11 @@ async function main(): Promise<void> {
     }
 
     console.log(ran === 0 ? "Already up to date." : `Applied ${ran} migration(s).`);
+    if (unverified > 0) {
+      console.log(
+        `${unverified} of them were applied by another tool, so this run could not check them for drift.`,
+      );
+    }
   } finally {
     await client.end();
   }
@@ -231,8 +269,10 @@ main().catch((error: unknown) => {
   process.exit(1);
 });
 
-// Checksums are computed the same way regardless of platform; kept as a helper
-// so a future `verify` command can reuse it.
+// Hoisted, so the apply loop above can call it. Over the file's exact bytes,
+// trailing newline included, which is the point: the comparison is against
+// what this runner itself recorded, never against another tool's idea of the
+// same migration.
 export function checksum(sql: string): string {
   return createHash("sha256").update(sql).digest("hex");
 }

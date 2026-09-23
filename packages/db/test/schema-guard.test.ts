@@ -249,7 +249,33 @@ describe("cross-tenant references", () => {
 });
 
 describe("SECURITY DEFINER functions", () => {
-  it("pins a search_path on all of them", async () => {
+  it("pins a search_path on every function backing a policy", async () => {
+    // Originally this asserted only against SECURITY DEFINER functions, which
+    // is the usual advice and misses the case that matters here. The app
+    // helpers are SECURITY INVOKER, so they ran as the caller and looked safe,
+    // but every policy in this schema is written in terms of them. A predicate
+    // whose name resolution the caller can influence is a tenant boundary the
+    // caller can argue with, privilege escalation or not. So the rule is now
+    // every function in app and public, definer or not.
+    const unpinned = await asAdmin(async (tx) => {
+      const { rows } = await tx.query<{ nspname: string; proname: string }>(
+        `select n.nspname, p.proname
+           from pg_proc p
+           join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname in ('public', 'app')
+            and p.prokind = 'f'
+            and (p.proconfig is null
+                 or not exists (
+                   select 1 from unnest(p.proconfig) cfg where cfg like 'search_path=%'
+                 ))
+          order by n.nspname, p.proname`,
+      );
+      return rows.map((r) => `${r.nspname}.${r.proname}`);
+    });
+    expect(unpinned).toEqual([]);
+  });
+
+  it("pins a search_path on the SECURITY DEFINER ones in particular", async () => {
     // A definer function without a pinned search_path can be hijacked by a
     // caller who creates a same-named object in a schema earlier on the path.
     const unpinned = await asAdmin(async (tx) => {
@@ -284,6 +310,89 @@ describe("SECURITY DEFINER functions", () => {
       return rows.map((r) => r.proname);
     });
     expect(exposed).toEqual([]);
+  });
+});
+
+describe("table privileges", () => {
+  // These exist because of a gap the rest of this file could not see. Every
+  // migration revokes from PUBLIC and grants what a table needs, which is the
+  // whole story on a bare Postgres. Supabase additionally ships default
+  // privileges granting ALL on new tables to anon and authenticated, so on a
+  // real project those per-table grants narrowed nothing and both roles held
+  // every privilege including TRUNCATE.
+  //
+  // They run against a local Postgres where that cannot happen, so they pass
+  // trivially here. That is fine: they are not trying to reproduce the
+  // platform, they are pinning the intended matrix so a migration that grants
+  // too much fails in CI wherever it runs.
+
+  it("gives anon nothing beyond reading plans", async () => {
+    const held = await asAdmin(async (tx) => {
+      const { rows } = await tx.query<{ table_name: string; privilege_type: string }>(
+        `select table_name, privilege_type
+           from information_schema.role_table_grants
+          where table_schema = 'public'
+            and grantee = 'anon'
+            and not (table_name = 'plans' and privilege_type = 'SELECT')
+          order by table_name, privilege_type`,
+      );
+      return rows.map((r) => `${r.table_name}.${r.privilege_type}`);
+    });
+
+    expect(
+      held,
+      "anon is the unauthenticated role. It reads the pricing page and nothing else.",
+    ).toEqual([]);
+  });
+
+  it("grants TRUNCATE to nobody but the owner and service_role", async () => {
+    // The one privilege row level security does not constrain. A role holding
+    // it can empty any table whatever the policies say, which is what makes it
+    // worth a test of its own rather than a line in the one above.
+    const holders = await asAdmin(async (tx) => {
+      const { rows } = await tx.query<{ table_name: string; grantee: string }>(
+        `select table_name, grantee
+           from information_schema.role_table_grants
+          where table_schema = 'public'
+            and privilege_type = 'TRUNCATE'
+            and grantee in ('anon', 'authenticated', 'PUBLIC')
+          order by table_name, grantee`,
+      );
+      return rows.map((r) => `${r.table_name} -> ${r.grantee}`);
+    });
+
+    expect(
+      holders,
+      "TRUNCATE bypasses row level security, including on the append-only evidence tables.",
+    ).toEqual([]);
+  });
+
+  it("lets authenticated write only where a policy could allow it", async () => {
+    // A write privilege on a table with no policy for that operation is dead
+    // weight at best. On the evidence tables it is the append-only guarantee
+    // being contradicted one layer down.
+    const contradictions = await asAdmin(async (tx) => {
+      const { rows } = await tx.query<{ table_name: string; privilege_type: string }>(
+        `select g.table_name, g.privilege_type
+           from information_schema.role_table_grants g
+          where g.table_schema = 'public'
+            and g.grantee = 'authenticated'
+            and g.privilege_type in ('INSERT', 'UPDATE', 'DELETE')
+            and not exists (
+              select 1 from pg_policies p
+               where p.schemaname = 'public'
+                 and p.tablename = g.table_name
+                 and p.cmd = g.privilege_type
+            )
+          order by g.table_name, g.privilege_type`,
+      );
+      return rows.map((r) => `${r.table_name}.${r.privilege_type}`);
+    });
+
+    expect(
+      contradictions,
+      "Either the policy is missing or the grant is. Both are worth knowing about.",
+    ).toEqual([]);
   });
 });
 
